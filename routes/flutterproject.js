@@ -2,7 +2,7 @@ const router = require('express').Router();
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-router.post('/', async (req, res) => {
+router.post('/ecommerce', async (req, res) => {
     const searchQuery = req.body.searchQuery;
 
     try {
