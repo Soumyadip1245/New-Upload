@@ -1,52 +1,83 @@
-const router = require('express').Router();
+const router = require('express').Router()
 const axios = require('axios');
 const cheerio = require('cheerio');
-router.post('/a', async (req, res) => {
-    const searchQuery = req.body.searchQuery;
+const puppeteer = require('puppeteer');
+async function getZeptoUrl(searchQuery) {
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
 
-    try {
-        // const zeptoProducts = await scrapeZepto(searchQuery);
-        let bigbasketProducts = await scrapeBigbasket(searchQuery);
-        const mergedList = zeptoProducts.concat(bigbasketProducts)
-        // const sortedData = sortProductsByPrice(mergedList)
-        res.json(mergedList)
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-async function scrapeZepto(searchQuery) {
-    const url = `https://zepto.in/search?q=${encodeURIComponent(searchQuery)}`;
-    console.log(url)
-    const response = await axios.get(url);
-    const $ = cheerio.load(response.data);
-    const products = [];
-    $('.product-list-item').each((index, element) => {
-        const title = $(element).find('.product-name').text().trim();
-        const price = $(element).find('.product-price').text().trim();
-        const image = $(element).find('img').attr('src');
+    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(searchQuery)}+site:zeptonow.com`);
 
-        if (title && price) {
-            products.push({ title, price, image, from: "Zepto" });
-        }
+    const searchResults = await page.$$eval('div.g', results => {
+        return results.map(result => {
+            const linkElement = result.querySelector('a');
+            const link = linkElement.getAttribute('href');
+            return link.startsWith('/url?') ? new URLSearchParams(link.substring(5)).get('q') : link;
+        });
     });
-    return products;
+
+    await browser.close();
+
+    const zeptoUrl = searchResults.find(result => result.startsWith('https://www.zeptonow.com/'));
+    return zeptoUrl;
+}
+async function getBigBasketUrl(searchQuery) {
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
+
+    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(searchQuery)}+site:bigbasket.com`);
+
+    const searchResults = await page.$$eval('div.g', results => {
+        return results.map(result => {
+            const linkElement = result.querySelector('a');
+            const link = linkElement.getAttribute('href');
+            return link.startsWith('/url?') ? new URLSearchParams(link.substring(5)).get('q') : link;
+        });
+    });
+
+    await browser.close();
+
+    const bigBasketUrl = searchResults.find(result => result.startsWith('https://www.bigbasket.com/'));
+    return bigBasketUrl;
 }
 
-async function scrapeBigbasket(searchQuery) {
-    const url = `https://www.bigbasket.com/ps/?q=${encodeURIComponent(searchQuery)}`;
-    console.log(url)
-    const response = await axios.get(url);
-    const $ = cheerio.load(response.data);
-    const products = [];
-    $('.product-list li').each((index, element) => {
-        const title = $(element).find('.product-name').text().trim();
-        const price = $(element).find('.product-price').text().trim();
-        const image = $(element).find('.product-image img').attr('src');
+router.post('/grocery', async (req, res) => {
+    var searchQuery = req.body.searchQuery
+    const zeptoUrl = await getZeptoUrl(searchQuery);
+    const browserzepto = await puppeteer.launch();
+    const pagezepto = await browserzepto.newPage();
+    await pagezepto.goto(zeptoUrl);
+    const priceElement = await pagezepto.$('h4.block.font-lato.Md1FKI.sm\\:\\!text-\\[1\\.5rem\\]');
+    const nameElement = await pagezepto.$('h1.block.font-lato.XUM3wW.\\!text-\\[1\\.25rem\\].\\!leading-\\[1\\.5rem\\].\\!tracking-normal');
+    const pricezepto = await priceElement.evaluate(element => element.textContent.trim());
+    const namezepto = await nameElement.evaluate(element => element.textContent.trim());
+    await browserzepto.close();
 
-        if (title && price) {
-            products.push({ title, price, image, from: "Bigbasket" });
-        }
-    });
-    return products;
-}
+    const bigBasketUrl = await getBigBasketUrl(searchQuery);
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
+    await page.goto(bigBasketUrl);
+    const bigbasketpriceElement = await page.$('td.IyLvo');
+    const bigbasketnameElement = await page.$('h1.GrE04');
+    const bigbasketprice = await bigbasketpriceElement.evaluate(element => element.textContent.trim());
+    const bigbasketname = await bigbasketnameElement.evaluate(element => element.textContent.trim());
+
+    res.json({
+        "success": true,
+        products: [
+            {
+                "title": bigbasketname,
+                "price": bigbasketprice,
+                "from": "Bigbasket"
+            }, {
+                "title": namezepto,
+                "price": pricezepto,
+                "from": "Zepto"
+            }
+        ]
+
+    })
+    await browser.close();
+
+})
 module.exports = router;
